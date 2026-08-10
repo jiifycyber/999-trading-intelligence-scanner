@@ -1,4 +1,3 @@
-import 'market_radar.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -28,6 +27,7 @@ class _DashboardState extends State<Dashboard> {
   int _lockedScore = 0;
   double _entryPrice = 0;
 
+  DateTime? _lockedAt;
   DateTime? _expiresAt;
 
   String? _lastResult;
@@ -137,6 +137,8 @@ class _DashboardState extends State<Dashboard> {
     _lockedScore = result.score;
     _entryPrice = result.price;
 
+    _lockedAt = now;
+
     _expiresAt = now.add(
       const Duration(
         seconds: lockSeconds,
@@ -192,6 +194,7 @@ class _DashboardState extends State<Dashboard> {
 
     _entryPrice = 0;
 
+    _lockedAt = null;
     _expiresAt = null;
 
     _candidateSymbol = null;
@@ -270,11 +273,6 @@ class _DashboardState extends State<Dashboard> {
               child: Column(
                 children: [
                   _feedPanel(),
-                  MarketRadar(
-                    results: results,
-                    lockedSymbol: _lockedSymbol,
-                    confirmingSymbol: _candidateSymbol,
-                  ),
                   _signalPanel(),
                   _performancePanel(),
                   _dukePanel(
@@ -295,11 +293,6 @@ class _DashboardState extends State<Dashboard> {
                     child: Column(
                       children: [
                         _feedPanel(),
-                        MarketRadar(
-                          results: results,
-                          lockedSymbol: _lockedSymbol,
-                          confirmingSymbol: _candidateSymbol,
-                        ),
                         _signalPanel(),
                         _performancePanel(),
                         _dukePanel(
@@ -405,6 +398,7 @@ class _DashboardState extends State<Dashboard> {
 
                 _entryPrice = 0;
 
+                _lockedAt = null;
                 _expiresAt = null;
 
                 _lastResult = null;

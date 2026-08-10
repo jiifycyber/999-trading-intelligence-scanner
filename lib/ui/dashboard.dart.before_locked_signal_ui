@@ -1,0 +1,858 @@
+import 'package:flutter/material.dart';
+
+import '../core/scanner_engine.dart';
+import '../feeds/browser_bridge_adapter.dart';
+import '../feeds/demo_feed_adapter.dart';
+import '../models/scan_result.dart';
+
+class Dashboard extends StatefulWidget {
+  const Dashboard({super.key});
+
+  @override
+  State<Dashboard> createState() => _DashboardState();
+}
+
+class _DashboardState extends State<Dashboard> {
+  late final ScannerEngine engine;
+
+  @override
+  void initState() {
+    super.initState();
+    engine = ScannerEngine();
+  }
+
+  @override
+  void dispose() {
+    engine.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: engine,
+      builder: (context, _) {
+        final results = engine.rankedResults;
+        final width = MediaQuery.sizeOf(context).width;
+        final isMobile = width < 760;
+
+        return Scaffold(
+          appBar: AppBar(
+            toolbarHeight: isMobile ? 78 : 64,
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '999 Trading Intelligence',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: isMobile ? 21 : 24,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isMobile
+                      ? 'V2 • 60-Second Scanner • ${engine.assetCount} assets • ${engine.totalTicks} ticks'
+                      : 'V2 • 60-Second Multi-Asset Scanner',
+                  style: TextStyle(
+                    fontSize: isMobile ? 11 : 12,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+            actions: isMobile
+                ? null
+                : [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: Center(
+                        child: Text(
+                          '${engine.assetCount} assets • ${engine.totalTicks} ticks',
+                        ),
+                      ),
+                    ),
+                  ],
+          ),
+          body: isMobile ? _buildMobile(results) : _buildDesktop(results),
+        );
+      },
+    );
+  }
+
+  Widget _buildMobile(List<ScanResult> results) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _feedPanel(),
+          const Divider(height: 1),
+          _agentPanel(results),
+          const Divider(height: 1),
+          if (results.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 48,
+              ),
+              child: Center(
+                child: Text(
+                  'Connect a feed to begin scanning.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 17),
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  for (int i = 0; i < results.length; i++) ...[
+                    _ResultCard(result: results[i]),
+                    if (i != results.length - 1) const SizedBox(height: 10),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktop(List<ScanResult> results) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: 340,
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                _feedPanel(),
+                _agentPanel(results),
+              ],
+            ),
+          ),
+        ),
+        const VerticalDivider(width: 1),
+        Expanded(
+          child: results.isEmpty
+              ? const Center(
+                  child: Text(
+                    'Connect a feed to begin scanning.',
+                    style: TextStyle(fontSize: 18),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: results.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (_, index) =>
+                      _ResultCard(result: results[index]),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _feedPanel() {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF0B1018),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'LIVE FEED',
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+              fontSize: 18,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _statusRow('Status', engine.status),
+          _statusRow('Provider', engine.feedName),
+          _statusRow('Assets', '${engine.assetCount}'),
+          _statusRow('Ticks', '${engine.totalTicks}'),
+          const SizedBox(height: 18),
+          FilledButton.icon(
+            onPressed: () => engine.useFeed(DemoFeedAdapter()),
+            icon: const Icon(Icons.play_arrow),
+            label: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 13),
+              child: Text('Run Demo Feed'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.tonalIcon(
+            onPressed: () => engine.useFeed(BrowserBridgeAdapter()),
+            icon: const Icon(Icons.sensors),
+            label: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 13),
+              child: Text('Connect Browser Bridge'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: engine.disconnect,
+            icon: const Icon(Icons.link_off),
+            label: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text('Disconnect'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: engine.clear,
+            icon: const Icon(Icons.delete_outline),
+            label: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text('Clear Scanner'),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Feed processing uses sanitized quote data: '
+            'symbol + timestamp + price.',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.white.withValues(alpha: .50),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _agentPanel(List<ScanResult> results) {
+    final ScanResult? top = results.isEmpty ? null : results.first;
+
+    String headline;
+    String detail;
+
+    if (top == null) {
+      headline = 'WAITING FOR MARKET DATA';
+      detail = 'Once a feed is connected, I will identify the strongest '
+          'scanner setup, direction, confidence, entry conditions, '
+          'and reasons to avoid a trade.';
+    } else {
+      headline = _recommendation(top);
+      detail =
+          '${top.symbol} • ${top.score}/100 • ${_setupQuality(top)} setup. '
+          '${_entryGuidance(top)}';
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF181321),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: const Color(0xFF8E63D8).withValues(alpha: .55),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              CircleAvatar(
+                radius: 21,
+                backgroundColor: Color(0xFF6C4BA5),
+                child: Icon(
+                  Icons.psychology_alt,
+                  size: 24,
+                ),
+              ),
+              SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Agent Duke Da Boss X',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 17,
+                      ),
+                    ),
+                    Text(
+                      '999 Trading Intelligence AI Analyst',
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.circle,
+                size: 10,
+                color: Colors.greenAccent,
+              ),
+            ],
+          ),
+          const SizedBox(height: 15),
+          Text(
+            headline,
+            style: const TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            detail,
+            style: const TextStyle(
+              height: 1.45,
+              fontSize: 13,
+            ),
+          ),
+          if (top != null) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _agentMetric(
+                    'TOP ASSET',
+                    top.symbol,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _agentMetric(
+                    'CONFIDENCE',
+                    '${top.score}/100',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _agentMetric(
+                    'QUALITY',
+                    _setupQuality(top),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _agentMetric(
+                    'RSI',
+                    top.rsi14.toStringAsFixed(1),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _agentMetric(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .05),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 9,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 85,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: .55),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResultCard extends StatelessWidget {
+  const _ResultCard({
+    required this.result,
+  });
+
+  final ScanResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (result.side) {
+      SignalSide.call => 'CALL',
+      SignalSide.put => 'PUT',
+      SignalSide.wait => 'WAIT',
+    };
+
+    final icon = switch (result.side) {
+      SignalSide.call => Icons.trending_up,
+      SignalSide.put => Icons.trending_down,
+      SignalSide.wait => Icons.pause_circle_outline,
+    };
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, size: 28),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        result.symbol,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${result.source} • age ${result.ageMs} ms',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: .55),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text('${result.score}/100'),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: result.score / 100,
+            ),
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final mobile = constraints.maxWidth < 520;
+
+                final itemWidth = mobile
+                    ? (constraints.maxWidth - 12) / 2
+                    : (constraints.maxWidth - 36) / 4;
+
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 14,
+                  children: [
+                    SizedBox(
+                      width: itemWidth,
+                      child: _metric(
+                        'Price',
+                        result.price,
+                      ),
+                    ),
+                    SizedBox(
+                      width: itemWidth,
+                      child: _metric(
+                        'EMA9',
+                        result.ema9,
+                      ),
+                    ),
+                    SizedBox(
+                      width: itemWidth,
+                      child: _metric(
+                        'EMA21',
+                        result.ema21,
+                      ),
+                    ),
+                    SizedBox(
+                      width: itemWidth,
+                      child: _metric(
+                        'RSI14',
+                        result.rsi14,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: .035),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                result.reason,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: .68),
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _recommendationPanel(result),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _recommendationPanel(ScanResult result) {
+    final direction = switch (result.side) {
+      SignalSide.call => 'CALL',
+      SignalSide.put => 'PUT',
+      SignalSide.wait => 'WAIT',
+    };
+
+    final quality = _setupQuality(result);
+    final recommendation = _recommendation(result);
+    final guidance = _entryGuidance(result);
+    final avoid = _avoidGuidance(result);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14111C),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF8E63D8).withValues(alpha: .40),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.assistant,
+                size: 19,
+                color: Color(0xFFC7A8FF),
+              ),
+              SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'DUKE DA BOSS X RECOMMENDATION',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                    letterSpacing: .6,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            recommendation,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _tag('Direction: $direction'),
+              _tag('Quality: $quality'),
+              _tag('Confidence: ${result.score}/100'),
+              _tag('RSI: ${result.rsi14.toStringAsFixed(1)}'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'ENTRY GUIDANCE',
+            style: TextStyle(
+              color: Colors.white54,
+              fontWeight: FontWeight.w800,
+              fontSize: 10,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            guidance,
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'AVOID ENTRY IF',
+            style: TextStyle(
+              color: Colors.white54,
+              fontWeight: FontWeight.w800,
+              fontSize: 10,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            avoid,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: .72),
+              fontSize: 12,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Scanner output is analytical guidance, not a guaranteed trade outcome.',
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.white38,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tag(String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 9,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .055),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        value,
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _metric(String name, double value) {
+    String text;
+
+    if (name == 'RSI14') {
+      text = value.toStringAsFixed(1);
+    } else {
+      text = value.abs() >= 1000
+          ? value.toStringAsFixed(2)
+          : value.toStringAsFixed(5);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          name,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: .45),
+            fontSize: 10,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _setupQuality(ScanResult result) {
+  if (result.ageMs > 2500) {
+    return 'STALE';
+  }
+
+  if (result.score >= 85) {
+    return 'STRONG';
+  }
+
+  if (result.score >= 70) {
+    return 'MODERATE';
+  }
+
+  return 'WEAK';
+}
+
+String _recommendation(ScanResult result) {
+  if (result.ageMs > 2500) {
+    return 'DO NOT ENTER — FEED STALE';
+  }
+
+  if (result.side == SignalSide.wait) {
+    return 'WAIT FOR CONFIRMATION';
+  }
+
+  if (result.rsi14 >= 75) {
+    return 'WAIT — OVERBOUGHT / EXTENDED';
+  }
+
+  if (result.rsi14 <= 25) {
+    return 'WAIT — OVERSOLD / EXTENDED';
+  }
+
+  if (result.score >= 85) {
+    return result.side == SignalSide.call
+        ? 'STRONG CALL SETUP'
+        : 'STRONG PUT SETUP';
+  }
+
+  if (result.score >= 70) {
+    return result.side == SignalSide.call
+        ? 'WATCH FOR CALL ENTRY'
+        : 'WATCH FOR PUT ENTRY';
+  }
+
+  return 'WAIT — SETUP NOT STRONG ENOUGH';
+}
+
+String _entryGuidance(ScanResult result) {
+  if (result.ageMs > 2500) {
+    return 'Wait for fresh market data before making an entry decision.';
+  }
+
+  if (result.side == SignalSide.wait) {
+    return 'No entry yet. Wait for EMA direction, momentum, RSI, '
+        'and candle strength to align.';
+  }
+
+  if (result.rsi14 >= 75 || result.rsi14 <= 25) {
+    return 'Momentum is extended. Wait for a pullback or new confirmation '
+        'instead of entering late.';
+  }
+
+  if (result.score >= 85) {
+    return result.side == SignalSide.call
+        ? 'Bullish conditions are strongly aligned. Watch for continued '
+            'upward momentum and a clean confirmation rather than chasing '
+            'a sudden spike.'
+        : 'Bearish conditions are strongly aligned. Watch for continued '
+            'downward momentum and a clean confirmation rather than chasing '
+            'a sudden drop.';
+  }
+
+  if (result.score >= 70) {
+    return 'Direction is forming, but confirmation is incomplete. '
+        'Wait for momentum and the next short candle to confirm.';
+  }
+
+  return 'Stand aside until the confidence score and indicator agreement improve.';
+}
+
+String _avoidGuidance(ScanResult result) {
+  final warnings = <String>[];
+
+  if (result.ageMs > 1500) {
+    warnings.add('feed latency increases');
+  }
+
+  if (result.rsi14 >= 72) {
+    warnings.add('RSI becomes more overbought');
+  }
+
+  if (result.rsi14 <= 28) {
+    warnings.add('RSI becomes more oversold');
+  }
+
+  if (result.side == SignalSide.call && result.ema9 <= result.ema21) {
+    warnings.add('EMA9 falls below EMA21');
+  }
+
+  if (result.side == SignalSide.put && result.ema9 >= result.ema21) {
+    warnings.add('EMA9 rises above EMA21');
+  }
+
+  if (result.side == SignalSide.call && result.velocity <= 0) {
+    warnings.add('tick velocity turns downward');
+  }
+
+  if (result.side == SignalSide.put && result.velocity >= 0) {
+    warnings.add('tick velocity turns upward');
+  }
+
+  if (result.score < 70) {
+    warnings.add('confidence falls below 70');
+  }
+
+  if (warnings.isEmpty) {
+    return 'Momentum reverses • EMA alignment breaks • '
+        'feed becomes stale • confidence deteriorates.';
+  }
+
+  return warnings.join(' • ');
+}

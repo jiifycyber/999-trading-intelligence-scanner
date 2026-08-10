@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "999 Quote Bridge",
+  "version": "0.2.0",
+  "description": "Forwards sanitized symbol/timestamp/price quote events to the local 999 scanner relay.",
+  "permissions": [],
+  "host_permissions": [
+    "https://pocketoption.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://pocketoption.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page_bridge.js"
+      ],
+      "matches": [
+        "https://pocketoption.com/*"
+      ]
+    }
+  ]
+}

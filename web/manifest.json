@@ -1,0 +1,8 @@
+{
+  "name": "999 Trading Intelligence",
+  "short_name": "999 Scanner",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#070A10",
+  "theme_color": "#070A10"
+}

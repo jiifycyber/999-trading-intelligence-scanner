@@ -1,0 +1,634 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../models/scan_result.dart';
+
+class DukeMasterEntryEngine extends StatefulWidget {
+  final List<ScanResult> results;
+
+  const DukeMasterEntryEngine({
+    super.key,
+    required this.results,
+  });
+
+  @override
+  State<DukeMasterEntryEngine> createState() =>
+      _DukeMasterEntryEngineState();
+}
+
+class _DukeMasterEntryEngineState
+    extends State<DukeMasterEntryEngine> {
+  Timer? _clock;
+  DateTime? _lastInputAt;
+  String? _lastFingerprint;
+
+  int _samples = 0;
+  int _confirmations = 0;
+  double _smoothedScore = 0;
+  String _candidate = 'WAIT';
+
+  String? _readySide;
+  DateTime? _readyUntil;
+  double _entryPrice = 0;
+  int _entryScore = 0;
+  int _entryConfluence = 0;
+
+  final List<_EntryRecord> _history = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _ingest();
+
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(_expire);
+    });
+  }
+
+  @override
+  void didUpdateWidget(
+    covariant DukeMasterEntryEngine oldWidget,
+  ) {
+    super.didUpdateWidget(oldWidget);
+    _ingest();
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
+  }
+
+  ScanResult? get _top {
+    if (widget.results.isEmpty) return null;
+
+    final ranked = [...widget.results]
+      ..sort((a, b) => b.score.compareTo(a.score));
+
+    return ranked.first;
+  }
+
+  bool get _readyActive =>
+      _readySide != null &&
+      _readyUntil != null &&
+      DateTime.now().isBefore(_readyUntil!);
+
+  int get _readySeconds {
+    if (!_readyActive) return 0;
+
+    return math.max(
+      0,
+      _readyUntil!.difference(DateTime.now()).inSeconds,
+    );
+  }
+
+  void _expire() {
+    if (_readyUntil == null) return;
+    if (DateTime.now().isBefore(_readyUntil!)) return;
+
+    _readySide = null;
+    _readyUntil = null;
+    _candidate = 'WAIT';
+    _confirmations = 0;
+  }
+
+  String _rawSide(ScanResult result) {
+    final value = result.side
+        .toString()
+        .split('.')
+        .last
+        .toUpperCase();
+
+    if (value.contains('CALL') ||
+        value.contains('BUY') ||
+        value.contains('UP')) {
+      return 'CALL';
+    }
+
+    if (value.contains('PUT') ||
+        value.contains('SELL') ||
+        value.contains('DOWN')) {
+      return 'PUT';
+    }
+
+    return 'WAIT';
+  }
+
+  int _callVotes(ScanResult result) {
+    var votes = 0;
+
+    if (_rawSide(result) == 'CALL') votes++;
+    if (result.ema9 > result.ema21) votes++;
+    if (result.velocity > 0) votes++;
+
+    if (result.rsi14 >= 52 && result.rsi14 <= 75) {
+      votes++;
+    }
+
+    return votes;
+  }
+
+  int _putVotes(ScanResult result) {
+    var votes = 0;
+
+    if (_rawSide(result) == 'PUT') votes++;
+    if (result.ema9 < result.ema21) votes++;
+    if (result.velocity < 0) votes++;
+
+    if (result.rsi14 >= 25 && result.rsi14 <= 48) {
+      votes++;
+    }
+
+    return votes;
+  }
+
+  String _direction(ScanResult result) {
+    final callVotes = _callVotes(result);
+    final putVotes = _putVotes(result);
+
+    if (callVotes >= 3 && callVotes > putVotes) {
+      return 'CALL';
+    }
+
+    if (putVotes >= 3 && putVotes > callVotes) {
+      return 'PUT';
+    }
+
+    return 'WAIT';
+  }
+
+  int _confluence(
+    ScanResult result,
+    String direction,
+  ) {
+    var votes = direction == 'CALL'
+        ? _callVotes(result)
+        : direction == 'PUT'
+            ? _putVotes(result)
+            : 0;
+
+    if (result.score >= 80) votes++;
+
+    return votes;
+  }
+
+  int _effectiveAge(ScanResult result) {
+    final localAge = _lastInputAt == null
+        ? 999999
+        : DateTime.now()
+            .difference(_lastInputAt!)
+            .inMilliseconds;
+
+    return math.max(result.ageMs, localAge);
+  }
+
+  bool _fresh(ScanResult result) =>
+      _effectiveAge(result) <= 15000;
+
+  bool _scoreStable(ScanResult result) =>
+      (result.score - _smoothedScore).abs() <= 12;
+
+  String _fingerprint(ScanResult result) {
+    return [
+      result.symbol,
+      result.price.toStringAsFixed(6),
+      result.score,
+      result.ageMs,
+      result.rsi14.toStringAsFixed(2),
+      result.velocity.toStringAsFixed(6),
+      _rawSide(result),
+    ].join('|');
+  }
+
+  void _ingest() {
+    final result = _top;
+    if (result == null) return;
+
+    final fingerprint = _fingerprint(result);
+    if (fingerprint == _lastFingerprint) return;
+
+    _lastFingerprint = fingerprint;
+    _lastInputAt = DateTime.now();
+    _samples++;
+
+    _smoothedScore = _samples == 1
+        ? result.score.toDouble()
+        : (_smoothedScore * 0.72) + (result.score * 0.28);
+
+    _expire();
+    if (_readyActive) return;
+
+    final direction = _direction(result);
+    final confluence = _confluence(result, direction);
+
+    final qualified = _fresh(result) &&
+        _samples >= 12 &&
+        _smoothedScore >= 80 &&
+        _scoreStable(result) &&
+        direction != 'WAIT' &&
+        confluence >= 4;
+
+    if (!qualified) {
+      _candidate = 'WAIT';
+      _confirmations = 0;
+      return;
+    }
+
+    if (_candidate == direction) {
+      _confirmations++;
+    } else {
+      _candidate = direction;
+      _confirmations = 1;
+    }
+
+    if (_confirmations < 3) return;
+
+    _readySide = direction;
+    _readyUntil =
+        DateTime.now().add(const Duration(seconds: 60));
+    _entryPrice = result.price;
+    _entryScore = _smoothedScore.round();
+    _entryConfluence = confluence;
+
+    _history.insert(
+      0,
+      _EntryRecord(
+        side: direction,
+        price: result.price,
+        score: _entryScore,
+        confluence: confluence,
+        time: DateTime.now(),
+      ),
+    );
+
+    if (_history.length > 5) {
+      _history.removeLast();
+    }
+  }
+
+
+  String _grade(int score) {
+    if (score >= 90) return 'ELITE';
+    if (score >= 80) return 'STRONG';
+    if (score >= 70) return 'GOOD';
+    if (score >= 60) return 'WATCH';
+    return 'WEAK';
+  }
+
+  String _trendSide(ScanResult result) {
+    if (result.ema9 > result.ema21) return 'CALL';
+    if (result.ema9 < result.ema21) return 'PUT';
+    return 'WAIT';
+  }
+
+  String _momentumSide(ScanResult result) {
+    if (result.velocity > 0) return 'CALL';
+    if (result.velocity < 0) return 'PUT';
+    return 'WAIT';
+  }
+
+  String _rsiSide(ScanResult result) {
+    if (result.rsi14 >= 52 && result.rsi14 <= 75) {
+      return 'CALL';
+    }
+
+    if (result.rsi14 >= 25 && result.rsi14 <= 48) {
+      return 'PUT';
+    }
+
+    return 'WAIT';
+  }
+
+  String _displayState(ScanResult result) {
+    if (!_fresh(result)) return 'NO TRADE';
+    if (_readyActive) return '$_readySide READY';
+    if (_samples < 12) return 'WARMING';
+    if (_confirmations > 0) return 'CONFIRMING';
+    return 'WAIT';
+  }
+
+  Color _stateColor(String state) {
+    if (state.contains('CALL')) {
+      return const Color(0xFF39E58C);
+    }
+
+    if (state.contains('PUT')) {
+      return const Color(0xFFFF4D6D);
+    }
+
+    if (state == 'NO TRADE') {
+      return const Color(0xFFFF7849);
+    }
+
+    if (state == 'WARMING') {
+      return const Color(0xFF62B6FF);
+    }
+
+    return const Color(0xFFFFC857);
+  }
+
+  Color _gateColor(String state) {
+    switch (state) {
+      case 'PASS':
+        return const Color(0xFF39E58C);
+      case 'FAIL':
+        return const Color(0xFFFF4D6D);
+      case 'BLOCKED':
+        return const Color(0xFFFF7849);
+      default:
+        return const Color(0xFF62B6FF);
+    }
+  }
+
+  String _formatPrice(double price) {
+    if (price.abs() >= 1000) {
+      return price.toStringAsFixed(2);
+    }
+
+    return price.toStringAsFixed(5);
+  }
+
+  String _formatVelocity(ScanResult result) {
+    final sign = result.velocity > 0 ? '+' : '';
+    return '$sign${result.velocity.toStringAsFixed(5)}';
+  }
+
+  String _decisionReason(ScanResult result) {
+    final direction = _direction(result);
+    final confluence = _confluence(result, direction);
+    final score = _smoothedScore.round();
+
+    if (!_fresh(result)) {
+      return 'Entry blocked because the latest scanner result is too old.';
+    }
+
+    if (_samples < 12) {
+      return 'Collecting ${12 - _samples} more live observations.';
+    }
+
+    if (score < 80) {
+      return 'Waiting for the stable entry score to reach 80.';
+    }
+
+    if (!_scoreStable(result)) {
+      return 'Score is moving too quickly. Waiting for stability.';
+    }
+
+    if (direction == 'WAIT') {
+      return 'EMA, RSI, momentum, and scanner direction do not agree.';
+    }
+
+    if (confluence < 4) {
+      return 'Only $confluence of 5 entry groups agree.';
+    }
+
+    if (_readyActive) {
+      return 'Entry gate passed. Confirm direction and payout on the broker.';
+    }
+
+    if (_confirmations > 0) {
+      return '$_confirmations of 3 consecutive $direction confirmations passed.';
+    }
+
+    return 'Waiting for three consecutive confirmations.';
+  }
+
+  List<_GateItem> _gates(ScanResult result) {
+    final direction = _direction(result);
+    final rawSide = _rawSide(result);
+    final trendSide = _trendSide(result);
+    final momentumSide = _momentumSide(result);
+    final rsiSide = _rsiSide(result);
+    final confluence = _confluence(result, direction);
+    final stableScore = _smoothedScore.round();
+
+    return [
+      _GateItem(
+        label: 'LIVE DATA',
+        value: _fresh(result) ? 'FRESH' : 'STALE',
+        state: _fresh(result) ? 'PASS' : 'BLOCKED',
+        detail: '${_effectiveAge(result)}ms old',
+        icon: Icons.wifi_tethering,
+      ),
+      _GateItem(
+        label: 'SCANNER BIAS',
+        value: rawSide,
+        state: rawSide == 'WAIT'
+            ? 'PENDING'
+            : rawSide == direction
+                ? 'PASS'
+                : 'FAIL',
+        detail: 'Engine direction',
+        icon: Icons.radar,
+      ),
+      _GateItem(
+        label: 'EMA TREND',
+        value: trendSide,
+        state: trendSide == 'WAIT'
+            ? 'PENDING'
+            : trendSide == direction
+                ? 'PASS'
+                : 'FAIL',
+        detail: 'EMA 9 vs EMA 21',
+        icon: Icons.trending_up,
+      ),
+      _GateItem(
+        label: 'MOMENTUM',
+        value: momentumSide,
+        state: momentumSide == 'WAIT'
+            ? 'PENDING'
+            : momentumSide == direction
+                ? 'PASS'
+                : 'FAIL',
+        detail: _formatVelocity(result),
+        icon: Icons.speed,
+      ),
+      _GateItem(
+        label: 'RSI SAFETY',
+        value: result.rsi14.toStringAsFixed(1),
+        state: rsiSide == 'WAIT'
+            ? 'PENDING'
+            : rsiSide == direction
+                ? 'PASS'
+                : 'FAIL',
+        detail: 'Safe range 25-75',
+        icon: Icons.show_chart,
+      ),
+      _GateItem(
+        label: 'SCORE STABILITY',
+        value: '$stableScore/100',
+        state: stableScore >= 80 && _scoreStable(result)
+            ? 'PASS'
+            : 'FAIL',
+        detail: _grade(stableScore),
+        icon: Icons.analytics_outlined,
+      ),
+      _GateItem(
+        label: 'CONFLUENCE',
+        value: '$confluence/5',
+        state: confluence >= 4 ? 'PASS' : 'PENDING',
+        detail: 'Four groups required',
+        icon: Icons.hub_outlined,
+      ),
+      _GateItem(
+        label: 'ENTRY LOCK',
+        value: _readyActive
+            ? '$_readySide $_readySeconds SEC'
+            : '${math.min(_confirmations, 3)}/3',
+        state: _readyActive
+            ? 'PASS'
+            : _confirmations > 0
+                ? 'PENDING'
+                : 'PENDING',
+        detail: _readyActive
+            ? 'Entry ${_formatPrice(_entryPrice)}'
+            : 'Three confirmations',
+        icon: _readyActive
+            ? Icons.lock_clock
+            : Icons.lock_open,
+      ),
+    ];
+  }
+
+  Widget _chip(
+    String text,
+    Color color, {
+    IconData? icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 9,
+        vertical: 5,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: color.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(
+              icon,
+              color: color,
+              size: 12,
+            ),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _meter(
+    double value,
+    Color color,
+  ) {
+    final safeValue = value.clamp(0.0, 1.0).toDouble();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        height: 6,
+        color: Colors.white.withValues(alpha: 0.07),
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: safeValue,
+          child: Container(
+            color: color,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _gateCard(
+    _GateItem gate,
+    double width,
+  ) {
+    final color = _gateColor(gate.state);
+
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(minHeight: 82),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16132A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withValues(alpha: 0.32),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                gate.icon,
+                color: color,
+                size: 15,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  gate.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.55),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Text(
+            gate.value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            gate.detail,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.43),
+              fontSize: 8,
+            ),
+          ),
+        ],
+      ),
+    );
+  }

@@ -1,0 +1,834 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../models/scan_result.dart';
+
+class DukeMarketRadar extends StatefulWidget {
+  final List<ScanResult> results;
+
+  const DukeMarketRadar({
+    super.key,
+    required this.results,
+  });
+
+  @override
+  State<DukeMarketRadar> createState() => _DukeMarketRadarState();
+}
+
+class _DukeMarketRadarState extends State<DukeMarketRadar> {
+  Timer? _clock;
+  DateTime? _lastUpdateAt;
+
+  int _observations = 0;
+  int _confirmations = 0;
+  double _smoothedScore = 0;
+  String _candidate = 'WAIT';
+
+  String? _lockedSide;
+  DateTime? _lockedUntil;
+  double _lockedEntry = 0;
+  int _lockedScore = 0;
+
+  final List<_RadarEvent> _history = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _ingest();
+    _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(_expireLock);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant DukeMarketRadar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _ingest();
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
+  }
+
+  ScanResult? get _top {
+    if (widget.results.isEmpty) return null;
+    final ranked = [...widget.results]
+      ..sort((a, b) => b.score.compareTo(a.score));
+    return ranked.first;
+  }
+
+  bool get _lockActive =>
+      _lockedSide != null &&
+      _lockedUntil != null &&
+      DateTime.now().isBefore(_lockedUntil!);
+
+  int get _lockSeconds {
+    if (!_lockActive) return 0;
+    return math.max(
+      0,
+      _lockedUntil!.difference(DateTime.now()).inSeconds,
+    );
+  }
+
+  void _expireLock() {
+    if (_lockedUntil == null) return;
+    if (DateTime.now().isBefore(_lockedUntil!)) return;
+
+    _lockedSide = null;
+    _lockedUntil = null;
+    _confirmations = 0;
+    _candidate = 'WAIT';
+  }
+
+  void _ingest() {
+    final result = _top;
+    if (result == null) return;
+
+    _lastUpdateAt = DateTime.now();
+    _observations++;
+
+    _smoothedScore = _observations == 1
+        ? result.score.toDouble()
+        : (_smoothedScore * 0.72) + (result.score * 0.28);
+
+    _expireLock();
+    if (_lockActive) return;
+
+    final direction = _side(result);
+    final qualified = _isFresh(result) &&
+        _observations >= 12 &&
+        _smoothedScore >= 80 &&
+        direction != 'WAIT' &&
+        _indicatorsAgree(result, direction);
+
+    if (!qualified) {
+      _candidate = 'WAIT';
+      _confirmations = 0;
+      return;
+    }
+
+    if (_candidate == direction) {
+      _confirmations++;
+    } else {
+      _candidate = direction;
+      _confirmations = 1;
+    }
+
+    if (_confirmations < 3) return;
+
+    _lockedSide = direction;
+    _lockedUntil = DateTime.now().add(const Duration(seconds: 60));
+    _lockedEntry = result.price;
+    _lockedScore = _smoothedScore.round();
+
+    _history.insert(
+      0,
+      _RadarEvent(
+        side: direction,
+        price: result.price,
+        score: _lockedScore,
+        time: DateTime.now(),
+      ),
+    );
+
+    if (_history.length > 5) {
+      _history.removeLast();
+    }
+  }
+
+  String _side(ScanResult result) {
+    final value = result.side.toString().split('.').last.toUpperCase();
+
+    if (value.contains('CALL') ||
+        value.contains('BUY') ||
+        value.contains('UP')) {
+      return 'CALL';
+    }
+
+    if (value.contains('PUT') ||
+        value.contains('SELL') ||
+        value.contains('DOWN')) {
+      return 'PUT';
+    }
+
+    return 'WAIT';
+  }
+
+  bool _indicatorsAgree(ScanResult result, String direction) {
+    if (direction == 'CALL') {
+      return result.ema9 > result.ema21 &&
+          result.velocity > 0 &&
+          result.rsi14 >= 50 &&
+          result.rsi14 <= 75;
+    }
+
+    if (direction == 'PUT') {
+      return result.ema9 < result.ema21 &&
+          result.velocity < 0 &&
+          result.rsi14 >= 25 &&
+          result.rsi14 <= 50;
+    }
+
+    return false;
+  }
+
+  int _feedAge(ScanResult result) {
+    final localAge = _lastUpdateAt == null
+        ? 999999
+        : DateTime.now().difference(_lastUpdateAt!).inMilliseconds;
+
+    return math.max(result.ageMs, localAge);
+  }
+
+  bool _isFresh(ScanResult result) => _feedAge(result) <= 2500;
+
+  String _grade(int score) {
+    if (score >= 90) return 'ELITE';
+    if (score >= 80) return 'STRONG';
+    if (score >= 70) return 'GOOD';
+    if (score >= 60) return 'WATCH';
+    return 'WEAK';
+  }
+
+  Color _signalColor(String signal) {
+    switch (signal) {
+      case 'CALL':
+        return const Color(0xFF39E58C);
+      case 'PUT':
+        return const Color(0xFFFF4D6D);
+      case 'STALE':
+        return const Color(0xFFFF7A45);
+      case 'WARMING':
+        return const Color(0xFF62B6FF);
+      case 'CONFIRMING':
+        return const Color(0xFFFFC857);
+      default:
+        return const Color(0xFFFFC857);
+    }
+  }
+
+  String _displaySignal(ScanResult result) {
+    if (!_isFresh(result)) return 'STALE';
+    if (_lockActive) return _lockedSide!;
+    if (_observations < 12) return 'WARMING';
+
+    if (_candidate != 'WAIT' && _confirmations > 0) {
+      return 'CONFIRMING';
+    }
+
+    return 'WAIT';
+  }
+
+  String _trend(ScanResult result) {
+    if (result.ema9 > result.ema21 && result.velocity > 0) {
+      return 'BULLISH';
+    }
+
+    if (result.ema9 < result.ema21 && result.velocity < 0) {
+      return 'BEARISH';
+    }
+
+    return 'MIXED';
+  }
+
+  String _formatPrice(ScanResult result) {
+    if (result.price.abs() >= 1000) {
+      return result.price.toStringAsFixed(2);
+    }
+
+    return result.price.toStringAsFixed(5);
+  }
+
+  String _formatVelocity(ScanResult result) {
+    final sign = result.velocity > 0 ? '+' : '';
+    return '$sign${result.velocity.toStringAsFixed(5)}';
+  }
+
+  String _reason(ScanResult result) {
+    final cleaned = result.reason.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    if (!_isFresh(result)) {
+      return 'Feed update is stale. No trade decision is allowed.';
+    }
+
+    if (_observations < 12) {
+      return 'Collecting live EUR/USD observations before scoring.';
+    }
+
+    if (_lockActive) {
+      return 'Three confirmations passed. Verify on the broker chart.';
+    }
+
+    if (_confirmations > 0) {
+      return 'Confirmation $_confirmations of 3 received for $_candidate.';
+    }
+
+    if (cleaned.isEmpty) {
+      return 'Waiting for EMA, RSI, velocity, and score agreement.';
+    }
+
+    return cleaned;
+  }
+
+  Widget _badge(
+    String text,
+    Color color, {
+    IconData? icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: color.withValues(alpha: 0.65),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(
+              icon,
+              size: 13,
+              color: color,
+            ),
+            const SizedBox(width: 5),
+          ],
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _meter(
+    double value,
+    Color color,
+  ) {
+    final safeValue = value.clamp(0.0, 1.0).toDouble();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        height: 6,
+        color: Colors.white.withValues(alpha: 0.07),
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: safeValue,
+          child: Container(
+            decoration: BoxDecoration(
+              color: color,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.5),
+                  blurRadius: 8,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _metricCard({
+    required String label,
+    required String value,
+    required Color accent,
+    required double width,
+    String? detail,
+  }) {
+    return Container(
+      width: width,
+      constraints: const BoxConstraints(minHeight: 72),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17142C),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: accent.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.55),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.7,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: accent,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          if (detail != null) ...[
+            const SizedBox(height: 3),
+            Text(
+              detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 9,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _clockTime(DateTime value) {
+    final local = value.toLocal();
+    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = local.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final result = _top;
+
+    if (result == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF100D20),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: const Color(0xFF7147FF).withValues(alpha: 0.55),
+          ),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.radar,
+                color: Color(0xFF9C7CFF),
+                size: 34,
+              ),
+              SizedBox(height: 12),
+              Text(
+                'DUKE MARKET RADAR X',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              SizedBox(height: 7),
+              Text(
+                'Waiting for live EUR/USD prices...',
+                style: TextStyle(
+                  color: Color(0xFFAAA4C8),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final score = _smoothedScore.round().clamp(0, 100).toInt();
+    final signal = _displaySignal(result);
+    final signalColor = _signalColor(signal);
+    final fresh = _isFresh(result);
+    final feedAge = _feedAge(result);
+    final trend = _trend(result);
+
+    final statusColor =
+        fresh ? const Color(0xFF39E58C) : const Color(0xFFFF7A45);
+
+    final lockColor = _lockActive ? _signalColor(_lockedSide!) : signalColor;
+
+    final displayedPrice = _lockActive
+        ? (_lockedEntry.abs() >= 1000
+            ? _lockedEntry.toStringAsFixed(2)
+            : _lockedEntry.toStringAsFixed(5))
+        : _formatPrice(result);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.of(context).size.width;
+
+        final narrow = availableWidth < 720;
+        final innerWidth = math.max(260.0, availableWidth - 32).toDouble();
+
+        final metricWidth = narrow
+            ? math.max(126.0, (innerWidth - 8) / 2).toDouble()
+            : math.max(120.0, (innerWidth - 32) / 5).toDouble();
+
+        final identity = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              result.symbol,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              displayedPrice,
+              style: const TextStyle(
+                color: Color(0xFFDAD5FF),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 9),
+            Text(
+              _reason(result),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.62),
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ],
+        );
+
+        final decision = Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              signal,
+              style: TextStyle(
+                color: signalColor,
+                fontSize: narrow ? 25 : 31,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.8,
+                shadows: [
+                  Shadow(
+                    color: signalColor.withValues(alpha: 0.55),
+                    blurRadius: 14,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '$score/100 - ${_grade(score)}',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.72),
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 9),
+            SizedBox(
+              width: narrow ? 145 : 190,
+              child: _meter(score / 100, signalColor),
+            ),
+          ],
+        );
+
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [
+                Color(0xFF100D20),
+                Color(0xFF17112D),
+                Color(0xFF0D0B18),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: const Color(0xFF7147FF).withValues(alpha: 0.7),
+              width: 1.4,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF7147FF).withValues(alpha: 0.2),
+                blurRadius: 20,
+              ),
+            ],
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF7147FF).withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.radar,
+                        color: Color(0xFF9C7CFF),
+                        size: 21,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'DUKE MARKET RADAR X',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          Text(
+                            'EUR/USD LIVE FOCUS ENGINE',
+                            style: TextStyle(
+                              color: Color(0xFF8F87B4),
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _badge(
+                      fresh ? 'LIVE FEED' : 'STALE FEED',
+                      statusColor,
+                      icon: fresh ? Icons.bolt : Icons.warning_amber_rounded,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        signalColor.withValues(alpha: 0.13),
+                        const Color(0xFF17142C),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: signalColor.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: narrow
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            identity,
+                            const SizedBox(height: 12),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: decision,
+                            ),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(child: identity),
+                            const SizedBox(width: 18),
+                            decision,
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _metricCard(
+                      label: 'RADAR SCORE',
+                      value: '$score/100',
+                      detail: _grade(score),
+                      accent: signalColor,
+                      width: metricWidth,
+                    ),
+                    _metricCard(
+                      label: 'MARKET TREND',
+                      value: trend,
+                      detail: 'EMA 9 / EMA 21',
+                      accent: trend == 'BULLISH'
+                          ? const Color(0xFF39E58C)
+                          : trend == 'BEARISH'
+                              ? const Color(0xFFFF4D6D)
+                              : const Color(0xFFFFC857),
+                      width: metricWidth,
+                    ),
+                    _metricCard(
+                      label: 'RSI 14',
+                      value: result.rsi14.toStringAsFixed(1),
+                      detail: 'Safe zone 25-75',
+                      accent: const Color(0xFF62B6FF),
+                      width: metricWidth,
+                    ),
+                    _metricCard(
+                      label: 'VELOCITY',
+                      value: _formatVelocity(result),
+                      detail: result.velocity >= 0 ? 'UP FLOW' : 'DOWN FLOW',
+                      accent: result.velocity >= 0
+                          ? const Color(0xFF39E58C)
+                          : const Color(0xFFFF4D6D),
+                      width: metricWidth,
+                    ),
+                    _metricCard(
+                      label: 'CONFIRMATIONS',
+                      value: _lockActive
+                          ? '3/3'
+                          : '${math.min(_confirmations, 3)}/3',
+                      detail:
+                          '${math.min(_observations, 12)}/12 warm-up - ${feedAge}ms',
+                      accent: lockColor,
+                      width: metricWidth,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: lockColor.withValues(alpha: 0.09),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: lockColor.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _lockActive
+                            ? Icons.lock_clock
+                            : fresh
+                                ? Icons.shield_outlined
+                                : Icons.gpp_bad_outlined,
+                        color: lockColor,
+                        size: 19,
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          _lockActive
+                              ? '$_lockedSide LOCKED at $displayedPrice - verify before entry'
+                              : !fresh
+                                  ? 'SAFETY BLOCK ACTIVE - live feed is stale'
+                                  : _observations < 12
+                                      ? 'WARM-UP - collecting live market observations'
+                                      : 'ARMED - requires score 80 and 3 confirmations',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.82),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (_lockActive)
+                        _badge(
+                          '$_lockSeconds SEC',
+                          lockColor,
+                        ),
+                    ],
+                  ),
+                ),
+                if (_history.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'RECENT RADAR LOCKS',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.45),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _history.map((event) {
+                      final eventColor = _signalColor(event.side);
+                      final eventPrice = event.price.abs() >= 1000
+                          ? event.price.toStringAsFixed(2)
+                          : event.price.toStringAsFixed(5);
+
+                      return _badge(
+                        '${event.side} ${event.score}/100 at $eventPrice ${_clockTime(event.time)}',
+                        eventColor,
+                      );
+                    }).toList(),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Text(
+                  'Decision support only. Confirm price, payout, and direction on the broker platform.',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.35),
+                    fontSize: 8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _RadarEvent {
+  final String side;
+  final double price;
+  final int score;
+  final DateTime time;
+
+  const _RadarEvent({
+    required this.side,
+    required this.price,
+    required this.score,
+    required this.time,
+  });
+}

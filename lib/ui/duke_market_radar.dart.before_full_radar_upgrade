@@ -1,0 +1,115 @@
+import 'package:flutter/material.dart';
+
+import '../models/scan_result.dart';
+
+class DukeMarketRadar extends StatelessWidget {
+  final List<ScanResult> results;
+
+  const DukeMarketRadar({
+    super.key,
+    required this.results,
+  });
+
+  String quality(int score) {
+    if (score >= 90) return 'ELITE';
+    if (score >= 80) return 'STRONG';
+    if (score >= 70) return 'GOOD';
+    return 'WEAK';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final top = results.isEmpty ? null : results.first;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF11151D),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF343945)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.radar, size: 28),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'DUKE MARKET RADAR',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Text(
+                'LIVE',
+                style: TextStyle(
+                  color: Color(0xFF62E6AC),
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          if (top == null)
+            const SizedBox(
+              height: 220,
+              child: Center(
+                child: Text(
+                  'Waiting for market data...',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.white54,
+                  ),
+                ),
+              ),
+            )
+          else ...[
+            Text(
+              top.symbol,
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${top.score}/100 • ${quality(top.score)}',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: top.score / 100,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              top.reason,
+              style: const TextStyle(
+                color: Colors.white70,
+                height: 1.45,
+              ),
+            ),
+          ],
+          const SizedBox(height: 22),
+          const Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Chip(label: Text('↑ CALL')),
+              Chip(label: Text('↓ PUT')),
+              Chip(label: Text('⌛ WAIT')),
+              Chip(label: Text('🔒 LOCKED')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}

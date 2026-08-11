@@ -1,0 +1,66 @@
+import 'package:flutter/material.dart';
+
+class TradingMenuDrawer extends StatelessWidget {
+  final VoidCallback onSignalHistory;
+
+  const TradingMenuDrawer({
+    super.key,
+    required this.onSignalHistory,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      backgroundColor: const Color(0xFF12101A),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              '999 TRADING INTELLIGENCE',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            SizedBox(height: 6),
+            Text(
+              'COMMAND CENTER',
+              style: TextStyle(color: Color(0xFFC9AEFF)),
+            ),
+            Divider(height: 32),
+            ListTile(
+              leading: Icon(Icons.dashboard_outlined),
+              title: Text('Scanner Dashboard'),
+            ),
+            ListTile(
+              leading: Icon(Icons.radar),
+              title: Text('Duke Market Radar'),
+            ),
+            ListTile(
+              leading: Icon(Icons.lock_clock),
+              title: Text('60-Second Signal Lock'),
+            ),
+            ListTile(
+              leading: Icon(Icons.verified_outlined),
+              title: Text('Live Validation'),
+            ),
+            ListTile(
+              leading: Icon(Icons.psychology_outlined),
+              title: Text('Agent Duke Da Boss X'),
+            ),
+            ListTile(
+              leading: Icon(Icons.tune),
+              title: Text('Scanner Settings'),
+            ),
+            ListTile(
+              leading: Icon(Icons.history),
+              title: const Text('Signal History'),
+              onTap: onSignalHistory,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

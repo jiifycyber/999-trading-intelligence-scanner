@@ -88682,7 +88682,7 @@ A.agG.prototype={
 $0(){},
 $S:0}
 A.Ou.prototype={
-K(a){return new A.zp(B.Fu,"999 Signal Intelligence",A.uF(B.ao,null,!0).amD(B.En,B.EV),!1,null)}}
+K(a){return new A.zp(B.Fu,"999 Trading Intelligence",A.uF(B.ao,null,!0).amD(B.En,B.EV),!1,null)}}
 A.ro.prototype={}
 A.Bo.prototype={
 I(){return"SignalSide."+this.b}}
@@ -95384,7 +95384,7 @@ B.lV=new A.c1(12,null,null,null)
 B.TE=new A.j(!0,null,null,null,null,null,18,B.aq,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null)
 B.X6=new A.bG("Agent Duke Da Boss X",null,B.TE,null,null,null,null,null,null)
 B.SC=new A.j(!0,B.du,null,null,null,null,12,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null)
-B.WL=new A.bG("999 Signal Intelligence AI Analyst",null,B.SC,null,null,null,null,null,null)
+B.WL=new A.bG("999 Trading Intelligence AI Analyst",null,B.SC,null,null,null,null,null,null)
 B.J8=s([B.X6,B.WL],t.p)
 B.F9=new A.k7(B.au,B.Y,B.M,B.aE,null,B.b7,null,0,B.J8,null)
 B.GH=new A.t4(1,B.hx,B.F9,null)
@@ -96043,7 +96043,7 @@ B.WA=new A.dE(B.Ug,B.T6,B.Uh,B.UM,B.SL,B.SV,B.Ts,B.UH,B.TG,B.Va,B.Sa,B.Sw,B.V7,B
 B.WB=new A.bG("CONNECTION: STABLE",null,null,null,null,null,null,null,null)
 B.WD=new A.bG("LIVE",null,null,null,null,null,null,null,null)
 B.Aw=new A.j(!0,null,null,null,null,null,19,B.aq,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null)
-B.WE=new A.bG("999 SIGNAL INTELLIGENCE",null,B.Aw,null,null,null,null,null,null)
+B.WE=new A.bG("999 TRADE X INTELLIGENCE",null,B.Aw,null,null,null,null,null,null)
 B.WF=new A.bG("Min. Confidence",null,null,null,null,null,null,null,null)
 B.Td=new A.j(!0,B.dv,null,null,null,null,10,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null)
 B.WH=new A.bG("LIVE",null,B.Td,null,null,null,null,null,null)

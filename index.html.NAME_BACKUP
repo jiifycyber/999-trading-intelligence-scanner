@@ -4,9 +4,9 @@
   <base href="/">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="999 Signal Intelligence V2">
+  <meta name="description" content="999 Trading Intelligence V2">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>999 Signal Intelligence</title>
+  <title>999 Trading Intelligence</title>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
